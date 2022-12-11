@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.funnco.crowtestserver.db_entity.TestEntity
 import com.funnco.crowtestserver.model.NewTestModel
+import com.funnco.crowtestserver.model.ResponseAvailableTest
 import com.funnco.crowtestserver.repository.AnswersCrudRepository
 import com.funnco.crowtestserver.repository.TestCrudRepository
 import com.funnco.crowtestserver.repository.UserCrudRepository
@@ -22,9 +23,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Collections
 import java.util.UUID
-import kotlin.math.log
 
 @RestController
 class TestController {
@@ -97,7 +96,7 @@ class TestController {
     }
 
     @GetMapping("/test/get/available")
-    fun getAvailableTests(@RequestHeader("Authorization") token: String): List<TestEntity> {
+    fun getAvailableTests(@RequestHeader("Authorization") token: String): List<ResponseAvailableTest> {
         val logTag = "/test/get/available:  "
         val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
         logger.info("$logTag Received request for getting all available requests for ${currentUser.mail}")
@@ -105,14 +104,14 @@ class TestController {
         val listOfAllTests = testCrudRepository.findAll()
         val listOfDoneTests = answersCrudRepository.findAllByUserId(currentUser.userId!!)
 
-        var listOfAvailableTests : List<TestEntity> = mutableListOf<TestEntity>()
+        var listOfAvailableTests: List<TestEntity> = mutableListOf<TestEntity>()
 
         // Searching for available tests
-        if(listOfDoneTests!=null) {
+        if (listOfDoneTests != null) {
             listOfAllTests.forEach { testEntity ->
                 var isFinished = false
                 for (finishedTest in listOfDoneTests) {
-                    if(finishedTest.testId == testEntity.testId){
+                    if (finishedTest.testId == testEntity.testId) {
                         isFinished = true
                         break
                     }
@@ -126,39 +125,116 @@ class TestController {
         }
 
         // deleting questions from every test
-        for(test in listOfAvailableTests){
+        for (test in listOfAvailableTests) {
             test.questions = null
         }
 
+        // parsing TestEntities to ResponseAvailableTests
+        val responseList: List<ResponseAvailableTest> = mutableListOf()
+        listOfAvailableTests.forEach {
+            (responseList as MutableList).add(
+                ResponseAvailableTest(
+                    testId = it.testId!!.toString(),
+                    heading = it.heading!!,
+                    description = it.descripiton!!,
+                    deadlineDate = it.deadlineDate!!.toLocalDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+                    startDate = it.startDate!!.toLocalDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+                    timeForSolving = it.timeForSolving!!
+                )
+            )
+        }
+
         // returning test
-        // TODO: Change return type to ResponseAvailableTest
-        return listOfAvailableTests
+        // TODO: Change return type to List<ResponseAvailableTest> from List<TestEntity>
+        return responseList
     }
 
     @GetMapping("/test/get/questions")
-    fun getQuestionsForTest(@RequestHeader("Authorization") token: String, @RequestParam("testId") testId: String): JsonNode{
+    fun getQuestionsForTest(
+        @RequestHeader("Authorization") token: String,
+        @RequestParam("testId") testId: String
+    ): JsonNode {
         val logTag = "/test/get/questions:  "
         val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
         logger.info("$logTag Received request for getting questions by ${currentUser.mail} for test $testId")
 
         val searchedTest = testCrudRepository.findByIdOrNull(UUID.fromString(testId))
-        if(searchedTest == null){
+        if (searchedTest == null) {
             logger.error("$logTag test with id $testId is not found")
-            RestControllerUtil.throwException(RestControllerUtil.HTTPResponseStatus.BAD_REQUEST, "Test with passed id is not found")
+            RestControllerUtil.throwException(
+                RestControllerUtil.HTTPResponseStatus.BAD_REQUEST,
+                "Test with passed id is not found"
+            )
         }
 
-        // TODO: Need to unselect all answered and shuffle answers
-        val questions = searchedTest!!.questions!!.get("list") as  ArrayNode
+        val questions = searchedTest!!.questions!!.get("list") as ArrayNode
         val responseJson = ObjectMapper().nodeFactory.arrayNode()
-        for(item in questions){
-            val answers = item.get("answers")
-            if(answers != null){
+        for (item in questions) {
+            val currentQuestion = ObjectMapper().nodeFactory.objectNode()
+            currentQuestion.put("task", item.get("task"))
+            currentQuestion.put("type", item.get("type"))
+            when (item.get("type").asText()) {
+                "one_answer", "multiple_answer" -> {
+                    val currentAnswers = ObjectMapper().nodeFactory.arrayNode()
+                    val startingAnswers = item.get("answers")
+                    val listOfAnswers = mutableListOf<JsonNode>()
+                    for (answer in startingAnswers) {
+                        listOfAnswers.add(answer)
+                    }
+                    listOfAnswers.shuffle()
+                    for (answer in listOfAnswers) {
+                        currentAnswers.add(answer)
+                    }
+                    currentQuestion.put("answers", currentAnswers)
+                }
+                "accordance_answer" -> {
+                    currentQuestion.put("firstListOfAnswers", item.get("firstListOfAnswers"))
 
-            } else {
-                (item as ObjectNode).put("answer", "")
+                    val currentAnswers = ObjectMapper().nodeFactory.arrayNode()
+                    val startingAnswers = item.get("secondListOfAnswers")
+                    val listOfAnswers = mutableListOf<JsonNode>()
+                    for (answer in startingAnswers) {
+                        listOfAnswers.add(answer)
+                    }
+                    listOfAnswers.shuffle()
+                    for (answer in listOfAnswers) {
+                        currentAnswers.add(answer)
+                    }
+                    currentQuestion.put("secondListOfAnswers", currentAnswers)
+                }
+                "input_answer" -> {
+                    currentQuestion.put("answer", "")
+                }
             }
+            responseJson.add(currentQuestion)
         }
 
-        return questions
+        return responseJson
+    }
+
+    @PostMapping("/test/post/answers")
+    fun postAnswersForTests(
+        @RequestHeader("Authorization") token: String,
+        @RequestParam("testId") testId: String,
+        @RequestBody userAnswers: JsonNode
+    ){
+        val logTag = "/test/post/answers:  "
+        val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
+        logger.info("$logTag Received request for posting answers by ${currentUser.mail} for test $testId")
+
+        val searchedTest = testCrudRepository.findByIdOrNull(UUID.fromString(testId))
+        if (searchedTest == null) {
+            logger.error("$logTag test with id $testId is not found")
+            RestControllerUtil.throwException(
+                RestControllerUtil.HTTPResponseStatus.BAD_REQUEST,
+                "Test with passed id is not found"
+            )
+        }
+
+        // Post answers
+        val questionsFromDB = searchedTest!!.questions!!.get("list") as ArrayNode
+        for(question in questionsFromDB){
+
+        }
     }
 }
