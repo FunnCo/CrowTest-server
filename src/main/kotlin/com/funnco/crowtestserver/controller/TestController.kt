@@ -3,8 +3,9 @@ package com.funnco.crowtestserver.controller
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ArrayNode
-import com.fasterxml.jackson.databind.node.ObjectNode
 import com.funnco.crowtestserver.db_entity.TestEntity
+import com.funnco.crowtestserver.db_entity.UserTestEntity
+import com.funnco.crowtestserver.model.FinishedTestModel
 import com.funnco.crowtestserver.model.NewTestModel
 import com.funnco.crowtestserver.model.ResponseAvailableTest
 import com.funnco.crowtestserver.repository.AnswersCrudRepository
@@ -23,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.UUID
+import java.util.*
 
 @RestController
 class TestController {
@@ -55,7 +56,10 @@ class TestController {
             newTest.deadLineDate == null ||
             newTest.startDate == null ||
             newTest.timeForSolving == null ||
-            newTest.questions == null
+            newTest.questions == null ||
+            newTest.criteriaExcellent == null ||
+            newTest.criteriaGood == null ||
+            newTest.criteriaPass == null
         ) {
             logger.error("$logTag Some of the fields are empty for test: ${newTest.heading}")
             RestControllerUtil.throwException(
@@ -92,6 +96,10 @@ class TestController {
         entity.timeForSolving = newTest.timeForSolving
         entity.questions = jsonOfQuestions
         entity.testId = UUID.randomUUID()
+        entity.criteriaPass = newTest.criteriaPass
+        entity.criteriaExcellent = newTest.criteriaExcellent
+        entity.criteriaGood = newTest.criteriaGood
+
         testCrudRepository.save(entity)
     }
 
@@ -152,7 +160,7 @@ class TestController {
     @GetMapping("/test/get/questions")
     fun getQuestionsForTest(
         @RequestHeader("Authorization") token: String,
-        @RequestParam("testId") testId: String
+        @RequestParam("testId") testId: String,
     ): JsonNode {
         val logTag = "/test/get/questions:  "
         val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
@@ -203,7 +211,9 @@ class TestController {
                     currentQuestion.put("secondListOfAnswers", currentAnswers)
                 }
                 "input_answer" -> {
-                    currentQuestion.put("answer", "")
+                    val answerNode = ObjectMapper().nodeFactory.objectNode()
+                    answerNode.put("content", "")
+                    currentQuestion.put("answer", answerNode)
                 }
             }
             responseJson.add(currentQuestion)
@@ -216,8 +226,9 @@ class TestController {
     fun postAnswersForTests(
         @RequestHeader("Authorization") token: String,
         @RequestParam("testId") testId: String,
-        @RequestBody userAnswers: JsonNode
-    ){
+        @RequestBody userAnswers: JsonNode,
+        @RequestParam("solvingTime") solvingTime: Double
+    ) {
         val logTag = "/test/post/answers:  "
         val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
         logger.info("$logTag Received request for posting answers by ${currentUser.mail} for test $testId")
@@ -231,10 +242,123 @@ class TestController {
             )
         }
 
-        // Post answers
         val questionsFromDB = searchedTest!!.questions!!.get("list") as ArrayNode
-        for(question in questionsFromDB){
+        val realAnswers = userAnswers as ArrayNode
+        var correctQuestions = 0
 
+        // determining count of correct answers
+        for (answeredQuestion in realAnswers) {
+            val correspondingQuestionFromDb =
+                questionsFromDB.find { it.get("task").asText() == answeredQuestion.get("task").asText() }
+            if (correspondingQuestionFromDb == null) {
+                logger.error("One of the received answers doesn't correspond to any question (info: ${currentUser.mail} for test $testId)")
+                RestControllerUtil.throwException(
+                    RestControllerUtil.HTTPResponseStatus.BAD_REQUEST,
+                    "One of the received answers doesn't correspond to any question"
+                )
+            }
+            when (correspondingQuestionFromDb!!.get("type").asText()) {
+                "one_answer", "multiple_answer" -> {
+                    val realAnswers = answeredQuestion.get("answers") as ArrayNode
+                    val expectedAnswers = correspondingQuestionFromDb.get("answers") as ArrayNode
+                    var totalVariants = expectedAnswers.size()
+                    var totalCorrectVariants = 0
+                    for (expectedAnswer in expectedAnswers) {
+                        var isCorrect = false
+                        val currentContent = expectedAnswer.get("content").asText()
+                        val currentSelection = expectedAnswer.get("isSelected").asBoolean()
+                        for (realAnswer in realAnswers) {
+                            if (realAnswer.get("content").asText() == currentContent && realAnswer.get("isSelected")
+                                    .asBoolean() == currentSelection
+                            ) {
+                                isCorrect = true
+                                break
+                            }
+                        }
+                        if (isCorrect) {
+                            totalCorrectVariants++
+                        }
+                    }
+                    if (totalVariants == totalCorrectVariants) {
+                        correctQuestions++
+                    }
+                }
+                "accordance_answer" -> {
+                    val realAnswers = parseAccordanceToMap(
+                        answeredQuestion.get("firstListOfAnswers") as ArrayNode,
+                        answeredQuestion.get("secondListOfAnswers") as ArrayNode
+                    )
+
+                    val expectedAnswers = parseAccordanceToMap(
+                        correspondingQuestionFromDb.get("firstListOfAnswers") as ArrayNode,
+                        correspondingQuestionFromDb.get("secondListOfAnswers") as ArrayNode
+                    )
+
+                    if (realAnswers.equals(expectedAnswers)) {
+                        correctQuestions++
+                    }
+                }
+                "input_answer" -> {
+                    val realAnswer = answeredQuestion.get("answer").get("content").asText()
+                    val expectedAnswer = correspondingQuestionFromDb.get("answer").get("content").asText()
+                    if (realAnswer.lowercase() == expectedAnswer.lowercase()) {
+                        correctQuestions++
+                    }
+                }
+            }
         }
+
+        // Determining mark
+        var mark = 2
+        if (correctQuestions >= searchedTest.criteriaExcellent!!) {
+            mark = 5
+        } else if (correctQuestions >= searchedTest.criteriaGood!!) {
+            mark = 4
+        } else if (correctQuestions >= searchedTest.criteriaPass!!) {
+            mark = 3
+        }
+
+        val solvingDate = LocalDate.now()
+        val solvingDateSQL = java.sql.Date(
+            java.util.Date.from(
+                solvingDate.atStartOfDay(ZoneId.of("Europe/Moscow")).toInstant()
+            ).time
+        )
+
+        val resultEntity = UserTestEntity()
+        resultEntity.testId = searchedTest.testId
+        resultEntity.userId = currentUser.userId
+        resultEntity.answers = userAnswers
+        resultEntity.mark = mark
+        resultEntity.solveDate = solvingDateSQL
+        resultEntity.timeUsed = solvingTime
+
+        logger.info("User with mail ${currentUser.mail} finished test ${searchedTest.testId} with mark $mark")
+
+        answersCrudRepository.save(resultEntity)
+
+    }
+
+    @GetMapping("/test/get/finished")
+    fun getFinishedTests(
+        @RequestHeader("Authorization") token: String,
+    ): List<FinishedTestModel> {
+        val logTag = "/test/get/finished:  "
+        val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
+        logger.info("$logTag Received request for getting finished tests from ${currentUser.mail}")
+
+        val resultList = mutableListOf<FinishedTestModel>()
+        answersCrudRepository.findAllByUserId(currentUser.userId!!)
+            ?.forEach { resultList.add(FinishedTestModel.parseFromEntity(it)) }
+        return resultList
+    }
+
+
+    private fun parseAccordanceToMap(questions: ArrayNode, answers: ArrayNode): Map<String, String> {
+        val resultMap = mutableMapOf<String, String>()
+        for (i in 0 until questions.size()) {
+            resultMap[questions[i].get("content").asText()] = answers[i].get("content").asText()
+        }
+        return resultMap
     }
 }

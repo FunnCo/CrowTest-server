@@ -42,6 +42,19 @@ open class TestEntity {
     @Column(name = "time_for_solving", nullable = true)
     open var timeForSolving: Int? = null
 
+    @Basic
+    @Column(name = "criteria_excellent", nullable = true)
+    open var criteriaExcellent: Int? = null
+
+    @Basic
+    @Column(name = "criteria_good", nullable = true)
+    open var criteriaGood : Int? = null
+
+    @Basic
+    @Column(name = "criteria_pass", nullable = true)
+    open var criteriaPass: Int? = null
+
+
     @Type(type = "json")
     @Column(name = "questions", nullable = false, columnDefinition = "json")
     open var questions: JsonNode? = null
