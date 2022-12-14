@@ -7,4 +7,5 @@ import java.util.*
 
 interface AnswersCrudRepository : CrudRepository<UserTestEntity, UUID> {
     fun findAllByUserId(uuid: UUID): List<UserTestEntity>?
+    fun findAllByTestId(uuid: UUID): List<UserTestEntity>?
 }

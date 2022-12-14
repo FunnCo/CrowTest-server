@@ -40,7 +40,7 @@ class TestController {
     private lateinit var testCrudRepository: TestCrudRepository
 
     @PostMapping("/test/add")
-    fun addTest(@RequestHeader("Authorization") token: String, @RequestBody newTest: NewTestModel) {
+    fun addTest(@RequestHeader("Authorization") token: String, @RequestBody newTest: NewTestModel, @RequestParam("grade") grade: String) {
         val logTag = "/test/add:  "
         logger.info("$logTag Received request for adding new test: ${newTest.heading}")
 
@@ -99,6 +99,7 @@ class TestController {
         entity.criteriaPass = newTest.criteriaPass
         entity.criteriaExcellent = newTest.criteriaExcellent
         entity.criteriaGood = newTest.criteriaGood
+        entity.grade = grade
 
         testCrudRepository.save(entity)
     }
@@ -153,7 +154,6 @@ class TestController {
         }
 
         // returning test
-        // TODO: Change return type to List<ResponseAvailableTest> from List<TestEntity>
         return responseList
     }
 
@@ -336,7 +336,6 @@ class TestController {
         logger.info("User with mail ${currentUser.mail} finished test ${searchedTest.testId} with mark $mark")
 
         answersCrudRepository.save(resultEntity)
-
     }
 
     @GetMapping("/test/get/finished")
@@ -353,6 +352,27 @@ class TestController {
         return resultList
     }
 
+    @GetMapping("/test/get/statistics")
+    fun getGradeStatistics(@RequestHeader("Authorization") token: String, @RequestParam("grade") grade: String, @RequestParam("testId") testId: String){
+        val logTag = "/test/get/statistics:  "
+        logger.info("$logTag Received request for getting statisitcs: $testId")
+
+        // Authorizing user
+        if (token != "-1") {
+            logger.error("$logTag User doesn't have enough privileges for adding new test: $testId")
+            RestControllerUtil.throwException(RestControllerUtil.HTTPResponseStatus.UNAUTHORIZED, "Access forbidden")
+        }
+
+        // Searching for test
+        val searchedTest = testCrudRepository.findByIdOrNull(UUID.fromString(testId))
+        if (searchedTest == null) {
+            logger.error("$logTag test with id $testId is not found")
+            RestControllerUtil.throwException(
+                RestControllerUtil.HTTPResponseStatus.BAD_REQUEST,
+                "Test with passed id is not found"
+            )
+        }
+    }
 
     private fun parseAccordanceToMap(questions: ArrayNode, answers: ArrayNode): Map<String, String> {
         val resultMap = mutableMapOf<String, String>()

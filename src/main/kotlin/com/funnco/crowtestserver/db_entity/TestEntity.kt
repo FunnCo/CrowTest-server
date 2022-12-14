@@ -54,6 +54,9 @@ open class TestEntity {
     @Column(name = "criteria_pass", nullable = true)
     open var criteriaPass: Int? = null
 
+    @Basic
+    @Column(name = "grade", nullable = true)
+    open var grade: String? = null
 
     @Type(type = "json")
     @Column(name = "questions", nullable = false, columnDefinition = "json")
