@@ -1,6 +1,7 @@
 package com.funnco.crowtestserver.controller
 
 import com.funnco.crowtestserver.db_entity.UserEntity
+import com.funnco.crowtestserver.model.UserInfo
 import com.funnco.crowtestserver.repository.UserCrudRepository
 import com.funnco.crowtestserver.utils.HashingUtil
 import com.funnco.crowtestserver.utils.RestControllerUtil
@@ -19,7 +20,6 @@ class UserController {
 
     @Autowired
     private lateinit var userRepository: UserCrudRepository
-
 
     @GetMapping("/user/login")
     fun authViaPassword(@RequestParam mail: String, password: String) : Any?{
@@ -55,7 +55,7 @@ class UserController {
     }
 
     @GetMapping("/user/login/token")
-    fun authViaToken(@RequestHeader("Authorization") token: String): ResponseEntity<Void> {
+    fun authViaToken(@RequestHeader("Authorization") token: String): UserInfo {
         val logtag = "/user/login/token:  "
 
         logger.info("$logtag Received login request with token: $token")
@@ -65,7 +65,7 @@ class UserController {
             logger.error("$logtag No user with such token found: $token")
             RestControllerUtil.throwException(RestControllerUtil.HTTPResponseStatus.NOT_FOUND, "Can't find user with passed token")
         }
-        return ResponseEntity<Void>(null, HttpStatus.OK)
+        return UserInfo(currentUser!!.name!!, currentUser.grade!!, currentUser.mail!!)
     }
 
     @PostMapping("/user/register")
@@ -78,7 +78,7 @@ class UserController {
         var currentUser = userRepository.findByMail(newUser.mail!!)
         if(currentUser != null){
             logger.error("$logtag User with such email already exists ${newUser.mail}")
-            RestControllerUtil.throwException(RestControllerUtil.HTTPResponseStatus.BAD_REQUEST, "User with same mail or phone already exists")
+            RestControllerUtil.throwException(RestControllerUtil.HTTPResponseStatus.UNAUTHORIZED, "User with same mail or phone already exists")
         }
 
         // Checking if all necessary fields are not empty

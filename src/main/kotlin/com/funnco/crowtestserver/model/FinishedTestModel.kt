@@ -4,6 +4,7 @@ import com.funnco.crowtestserver.db_entity.UserTestEntity
 import java.time.format.DateTimeFormatter
 
 class FinishedTestModel(
+    val id: String?,
     val heading: String?,
     val description: String?,
     val deadLineDate: String?,
@@ -17,6 +18,7 @@ class FinishedTestModel(
     companion object{
         fun parseFromEntity(entity: UserTestEntity, ): FinishedTestModel {
             return FinishedTestModel(
+                id = entity.testId.toString(),
                 heading = entity.refTestEntity!!.heading,
                 description = entity.refTestEntity!!.descripiton,
                 deadLineDate = entity.refTestEntity!!.deadlineDate!!.toLocalDate()

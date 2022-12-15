@@ -3,6 +3,7 @@ package com.funnco.crowtestserver.controller
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ArrayNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.funnco.crowtestserver.db_entity.TestEntity
 import com.funnco.crowtestserver.db_entity.UserTestEntity
 import com.funnco.crowtestserver.model.FinishedTestModel
@@ -143,10 +144,10 @@ class TestController {
         listOfAvailableTests.forEach {
             (responseList as MutableList).add(
                 ResponseAvailableTest(
-                    testId = it.testId!!.toString(),
+                    id = it.testId!!.toString(),
                     heading = it.heading!!,
                     description = it.descripiton!!,
-                    deadlineDate = it.deadlineDate!!.toLocalDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+                    deadLineDate = it.deadlineDate!!.toLocalDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
                     startDate = it.startDate!!.toLocalDate().format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
                     timeForSolving = it.timeForSolving!!
                 )
@@ -187,6 +188,7 @@ class TestController {
                     val startingAnswers = item.get("answers")
                     val listOfAnswers = mutableListOf<JsonNode>()
                     for (answer in startingAnswers) {
+                        (answer as ObjectNode).put("isSelected", false)
                         listOfAnswers.add(answer)
                     }
                     listOfAnswers.shuffle()
@@ -225,9 +227,9 @@ class TestController {
     @PostMapping("/test/post/answers")
     fun postAnswersForTests(
         @RequestHeader("Authorization") token: String,
-        @RequestParam("testId") testId: String,
+        @RequestHeader("testId") testId: String,
         @RequestBody userAnswers: JsonNode,
-        @RequestParam("solvingTime") solvingTime: Double
+        @RequestHeader("solvingTime") solvingTime: Double
     ) {
         val logTag = "/test/post/answers:  "
         val currentUser = RestControllerUtil.getUserByToken(userRepository, token)
